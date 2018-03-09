@@ -13,9 +13,8 @@ router.get('/', asyncHandler(async (req, res, next) => {
 //create bulk entry for receipt
 router.post('/', asyncHandler(async (req, res, next) => {
   // console.log(req.body)
-  await Receipt.bulkCreate(req.body)
-  const receipt = await Receipt.findAll()
-  console.log('receipt entry', receipt)
+  const receipt = await Receipt.bulkCreate(req.body, {returning: true})
+  // const receipt = await Receipt.findAll()
   if (receipt.length === 0) {
     return res.send('no entries returned').status(500)
   }
