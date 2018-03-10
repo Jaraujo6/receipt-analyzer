@@ -1,82 +1,78 @@
 const axios = require('axios')
-require('./secrets')
-
-let taggunKey = process.env.TAGGUN_KEY;
+const {convertReceiptFromURL} = require('./taggunReq')
+// const {sampleReceiptAmt, sampleReceiptText, sampleReceiptText2, sampleReceiptText3} = require('./exampleData')
 
 const receiptURLs = {
-  traderJoe1: 'http://4hatsandfrugal.com/wp-content/uploads/2015/06/64-dollar-grocery-budget-trader-joes1.jpg',
+  traderJoe1:
+    'http://4hatsandfrugal.com/wp-content/uploads/2015/06/64-dollar-grocery-budget-trader-joes1.jpg',
+  kroger1:
+    'https://thesaraandmalarishow.files.wordpress.com/2009/03/kroger.jpg',
+  foodtown1: 'http://neuseelandbilder.com/en/img/foodtown.gif',
+  fairway1: 'https://www.thebillfold.com/wp-content/uploads/2016/05/1zwdpei1DmTW0V5iyPVOB_A.png',
+  traderJoe2: 'https://birdfriendsnesthomes.files.wordpress.com/2015/02/fullsizerender_12.jpg',
 
 }
 
-const formData = {
-  url: receiptURLs.traderJoe1,
-  headers: {
-    'x-custom-key': 'string'
-  },
-  refresh: false,
-  incognito: false,
-  ipAddress: '32.4.2.223',
-  language: 'en'
+
+const processReceiptData = (receipt) => {
+  console.log('processing receipt')
+
+  //get merchant name
+  const summary = receipt.text.text.toLowerCase()
+  let merchant = ''
+  const storeNameMap = {foodtown: 'Foodtown', kroger: 'Kroger', trader: 'Trader Joe\'s', fairway: 'Fairway'}
+  const textArr = summary.split('\n')
+  const firstword = textArr[0].split(' ')[0] //find the firstword in the text (as opposed to first sentence)
+
+  if (storeNameMap[firstword]) {
+    merchant = storeNameMap[firstword]
+  } else {
+    for (let store of Object.keys(storeNameMap)) {
+      if (summary.includes(store)) {
+        merchant = storeNameMap[store]
+        break;
+      } else {
+        merchant = 'no name found'
+      }
+    }
+  }
+
+  //generate receipt array for bulk creation
+  const itemsArr = []
+  for (let item of receipt.amounts) {
+    let entry = {
+      merchant: merchant,
+      product: item.text.slice(0, -5),
+      price: +item.data,
+      date: /*receipt.date.data ||*/ null
+    }
+    if (entry.product.length > 2) itemsArr.push(entry)
+  }
+  console.log('receipt processed'/*, itemsArr*/)
+  return itemsArr
 }
 
-const taggun = axios.create({
-  baseURL: 'https://api.taggun.io/api/',
-  headers: { apikey: taggunKey },
-})
-
-// let dbEntry = {
-//   merchant: '',
-//   product: '',
-//   price: 0,
-//   date: ''
-// }
-
-const logTaggunRes = async (body) => {
-//res format --->
-//res.text.amounts[{ data(price), text(line item + price)}...]
+const storeReceiptDataFromURL = async (receiptURL, ocrFunc, processingFunc) => {
   const dbReq = axios.create({
-    baseURL: 'http://localhost:8080/api/',
+    baseURL: 'http://localhost:8080/api/'
   })
   try {
-    let res = await taggun.post('/receipt/v1/verbose/url', body)
-    res = res.data;
-    // console.log('res', res)
-
-    // console.log('merchant name obj', res.merchantName)
-    const merchant = !res.merchantName.data
-      ? res.text.text.split('\n')[0]
-      : res.merchantName.data
-    // console.log('merchant name', merchant)
-
-    const itemsArr = []
-    // console.log('res.amounts', res.amounts)
-    for (let item of res.amounts) {
-      // console.log('item', item)
-      let entry = {
-        merchant: merchant,
-        product: item.text.slice(0, -5),
-        price: +item.data,
-        date: res.date.data || Date.now()
-      }
-      // console.log('entry', entry)
-      if (entry.product.length > 2) itemsArr.push(entry)
-    }
-    
-    dbReq.post('/receipts', itemsArr)
-  }
-  catch (err) {
-    console.error(err)
+    const receipt = await ocrFunc(receiptURL)
+    const receiptArr = processingFunc(receipt)
+    console.log('storing receipt')
+    const storedReceipt = await dbReq.post('/receipts', receiptArr)
+    console.log('receipt stored'/*, storedReceipt.data*/)
+  } catch (err) {
+    console.log(err)
   }
 }
+// storeReceiptDataFromURL(receiptURLs.traderJoe2,  convertReceiptFromURL, processReceiptData)
 
-// const dbReq = axios.create({
-//   baseURL: 'http://localhost:8080/api/',
-// })
+const runapp = async urlArr => {
+  for (let receiptURL of Object.keys(urlArr)) {
+    await storeReceiptDataFromURL(urlArr[receiptURL], convertReceiptFromURL, processReceiptData)
+  }
+  console.log('batch receipt storage complete')
+}
 
-// dbReq.post('http://localhost:8080/api/receipts', [{
-//   merchant: 'merchant',
-//   product: 'product',
-//   price: 3.99,
-// }])
-// .catch(console.error)
-logTaggunRes(formData)
+runapp(receiptURLs)
